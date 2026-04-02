@@ -6,13 +6,13 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/ab180-logo-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="assets/ab180-logo-light.png">
-    <img src="assets/ab180-logo-light.png" alt="AB180" height="100">
+    <img src="assets/ab180-logo-light.png" alt="AB180" height="160">
   </picture>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/airbridge-logo-dark.png">
     <source media="(prefers-color-scheme: light)" srcset="assets/airbridge-logo-light.png">
-    <img src="assets/airbridge-logo-light.png" alt="Airbridge" height="100">
+    <img src="assets/airbridge-logo-light.png" alt="Airbridge" height="160">
   </picture>
 </p>
 
