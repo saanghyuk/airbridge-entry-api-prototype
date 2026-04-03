@@ -6,3 +6,13 @@ __pycache__/
 Untitled.ipynb
 query_and_sample/
 research/
+
+# 내부 운영용 (public repo에 올리지 않음)
+OPERATIONS.md
+notebooks/
+configs/
+docs/
+scripts/
+data/ablog/
+data/sample_app/
+data/generate_*.py
