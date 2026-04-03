@@ -8,7 +8,7 @@ Airbridge Entry API Server
 """
 import os
 import shutil
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
 from pydantic import BaseModel
 from pathlib import Path
 from server.predict import load_models_for_app, reload_models_for_app, predict, get_loaded_apps, list_available_apps, MODEL_DIR
@@ -38,7 +38,7 @@ class PredictRequest(BaseModel):
 
 
 @app.post("/v1/entry/predict")
-def entry_predict(req: PredictRequest):
+def entry_predict(req: PredictRequest, background_tasks: BackgroundTasks):
     """
     신규 유저의 trigger 추천 + D3 구매/이탈 예측.
 
@@ -64,8 +64,8 @@ def entry_predict(req: PredictRequest):
     # 3. 예측
     result = predict(req.airbridge_uuid, features, models)
 
-    # 4. 예측 결과 로깅 (Supabase 미설정 시 자동 스킵)
-    log_prediction(req.app_id, result)
+    # 4. 예측 결과 로깅 — 응답 반환 후 백그라운드에서 실행 (레이턴시 영향 없음)
+    background_tasks.add_task(log_prediction, req.app_id, result)
 
     return result
 
@@ -114,7 +114,7 @@ async def upload_model(app_id: str, file: UploadFile = File(...)):
         content = await file.read()
         f.write(content)
 
-    # 모델 리로드 시도 (필수 파일 3개 다 있어야 성공)
+    # 모델 리로드 시도 (필수 파일 2개 다 있어야 성공)
     models = reload_models_for_app(app_id)
 
     if models:

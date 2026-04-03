@@ -12,6 +12,7 @@ Airbridge Entry API — Server Inference Module
 import json
 import pickle
 import random
+import time
 import numpy as np
 from pathlib import Path
 from typing import Optional
@@ -40,6 +41,10 @@ ALL_FEATURE_NAMES = UA_FEATURE_NAMES + INAPP_FEATURE_NAMES
 
 # 앱별 모델 캐시: app_id -> models dict
 _model_cache: dict[str, dict] = {}
+
+# 유저별 trigger 캐시 (동일 유저 중복 요청 방지, TTL 1시간)
+_USER_CACHE_TTL = 3600  # seconds
+_user_trigger_cache: dict[str, tuple[dict, float]] = {}  # key: user_id -> (result, timestamp)
 
 
 def load_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[dict]:
@@ -132,6 +137,15 @@ def predict(user_id: str, features: np.ndarray, models: dict) -> dict:
     Returns:
         Clean API response dict (no mode, no latent_dimensions)
     """
+    # 동일 유저 중복 요청 방지 (TTL 1시간)
+    now = time.time()
+    if user_id in _user_trigger_cache:
+        cached_result, cached_at = _user_trigger_cache[user_id]
+        if now - cached_at < _USER_CACHE_TTL:
+            return cached_result
+        else:
+            del _user_trigger_cache[user_id]
+
     pltv = models["pltv"]
     churn = models["churn"]
     cate = models["cate"]
@@ -140,7 +154,7 @@ def predict(user_id: str, features: np.ndarray, models: dict) -> dict:
     # is_random: 이 유저가 랜덤 배정인지 (CATE 학습에 사용 가능한 데이터인지)
     if cate is None:
         # Exploration mode — CATE 모델 없음, 100% 랜덤 배정
-        trigger_scores = None
+        trigger_scores = {}
         best_trigger = random.choice(TREATMENT_TRIGGERS)
         is_random = True
     else:
@@ -166,12 +180,21 @@ def predict(user_id: str, features: np.ndarray, models: dict) -> dict:
             is_random = False
 
     # --- 2. pLTV: Purchase & Churn Prediction ---
+    # Feature 순서 검증 (모델이 기대하는 feature 순서와 일치하는지 확인)
+    expected_pltv_features = pltv.get("feature_names", ALL_FEATURE_NAMES)
+    if list(expected_pltv_features) != list(ALL_FEATURE_NAMES):
+        print(f"[Server] [WARNING] pLTV feature order mismatch: expected {expected_pltv_features}, got {ALL_FEATURE_NAMES}")
+
+    expected_churn_features = churn.get("feature_names", ALL_FEATURE_NAMES)
+    if list(expected_churn_features) != list(ALL_FEATURE_NAMES):
+        print(f"[Server] [WARNING] Churn feature order mismatch: expected {expected_churn_features}, got {ALL_FEATURE_NAMES}")
+
     x_all = features.reshape(1, -1)
     d3_purchase_prob = float(pltv["model"].predict_proba(x_all)[0, 1])
     d3_churn_prob = float(churn["model"].predict_proba(x_all)[0, 1])
 
     # --- 3. Build Response ---
-    return {
+    result = {
         "user_id": user_id,
         "best_trigger": best_trigger,
         "trigger_scores": trigger_scores,
@@ -179,6 +202,10 @@ def predict(user_id: str, features: np.ndarray, models: dict) -> dict:
         "d3_purchase_prob": round(d3_purchase_prob, 4),
         "d3_churn_prob": round(d3_churn_prob, 4),
     }
+
+    # 캐시에 저장
+    _user_trigger_cache[user_id] = (result, time.time())
+    return result
 
 
 # --- Example usage ---

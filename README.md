@@ -168,6 +168,7 @@ curl -X POST https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict
     "scarcity": 0.19,
     "novelty": 0.21
   },
+  "is_random": false,
   "d3_purchase_prob": 0.14,
   "d3_churn_prob": 0.41
 }
@@ -179,6 +180,7 @@ curl -X POST https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict
 |------|-----------|----------------|
 | `best_trigger` | 이 유저에게 가장 효과적인 메시지 유형 | 이 유형에 맞는 모달/인앱메시지를 보여주세요 |
 | `trigger_scores` | 4가지 메시지 유형 각각의 클릭 확률 | 더 세밀하게 분기하고 싶을 때 |
+| `is_random` | 이 배정이 랜덤 실험인지 여부 | `true`면 실험 데이터 (CATE 학습용), `false`면 모델 추천 |
 | `d3_purchase_prob` | 이 유저가 3일 내 구매할 확률 | 높으면 → 공격적 쿠폰, 낮으면 → 쿠폰 아낌 |
 | `d3_churn_prob` | 이 유저가 3일 내 이탈할 확률 | 높으면 → 리텐션 메시지 우선 |
 
@@ -293,6 +295,7 @@ Response:
     "scarcity": 0.19,
     "novelty": 0.21
   },
+  "is_random": false,
   "d3_purchase_prob": 0.14,
   "d3_churn_prob": 0.41
 }

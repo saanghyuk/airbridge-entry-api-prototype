@@ -1,7 +1,7 @@
-fastapi
-uvicorn[standard]
+fastapi>=0.135,<1.0
+uvicorn[standard]>=0.42,<1.0
 python-multipart
-numpy
-scikit-learn
-pandas
+numpy>=2.4,<3.0
+scikit-learn>=1.6,<2.0
+pandas>=2.3,<3.0
 supabase
