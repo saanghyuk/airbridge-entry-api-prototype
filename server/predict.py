@@ -5,10 +5,9 @@ Airbridge Entry API — Server Inference Module
 앱별로 모델 디렉토리가 분리되어 있고, 최초 요청 시 lazy loading.
 
 파일 구조:
-  models/{app_id}/fa_params.json        — FA loading matrix + standardization params
   models/{app_id}/d3_purchase_model.pkl — D3 purchase prediction model
   models/{app_id}/d3_churn_model.pkl    — D3 churn prediction model
-  models/{app_id}/cate_model.pkl        — Trigger CATE model (없으면 exploration mode)
+  models/{app_id}/cate_model.pkl        — Trigger CATE model (S-Learner, 없으면 exploration mode)
 """
 import json
 import pickle
@@ -31,6 +30,14 @@ UA_FEATURE_NAMES = [
     'recent_24h_ratio', 'click_ratio', 'impression_count', 'is_single_touch_install',
 ]
 
+INAPP_FEATURE_NAMES = [
+    'product_viewed_count', 'user_signin', 'product_addedtocart',
+    'deeplink_open', 'home_viewed', 'addtowishlist', 'onboarding',
+    'user_signup', 'total_events', 'n_event_types',
+]
+
+ALL_FEATURE_NAMES = UA_FEATURE_NAMES + INAPP_FEATURE_NAMES
+
 # 앱별 모델 캐시: app_id -> models dict
 _model_cache: dict[str, dict] = {}
 
@@ -44,7 +51,7 @@ def load_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[di
         model_dir: 모델 루트 디렉토리
 
     Returns:
-        모델 dict (fa, pltv, churn, cate) 또는 앱이 없으면 None
+        모델 dict (pltv, churn, cate) 또는 앱이 없으면 None
     """
     if app_id in _model_cache:
         return _model_cache[app_id]
@@ -62,20 +69,6 @@ def load_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[di
 
     models = {}
 
-    # FA params (optional — 연구/분석용)
-    fa_path = app_dir / "fa_params.json"
-    if fa_path.exists():
-        with open(fa_path) as f:
-            fa = json.load(f)
-        models["fa"] = {
-            "loading_matrix": np.array(fa["loading_matrix"]),
-            "mean": np.array(fa["mean"]),
-            "std": np.array(fa["std"]),
-            "factor_names": fa["factor_names"],
-        }
-    else:
-        models["fa"] = None
-
     # D3 Purchase model
     with open(app_dir / "d3_purchase_model.pkl", "rb") as f:
         models["pltv"] = pickle.load(f)
@@ -85,11 +78,12 @@ def load_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[di
         models["churn"] = pickle.load(f)
 
     # CATE model (optional — 없으면 exploration mode)
+    # S-Learner: 단일 모델, trigger를 feature로 포함
     cate_path = app_dir / "cate_model.pkl"
     if cate_path.exists():
         with open(cate_path, "rb") as f:
             models["cate"] = pickle.load(f)
-        print(f"[Server] [{app_id}] CATE model loaded -> optimized mode")
+        print(f"[Server] [{app_id}] CATE model loaded (S-Learner) -> optimized mode")
     else:
         models["cate"] = None
         print(f"[Server] [{app_id}] No CATE model -> exploration mode (random trigger)")
@@ -143,46 +137,45 @@ def predict(user_id: str, features: np.ndarray, models: dict) -> dict:
     cate = models["cate"]
 
     # --- 1. Trigger Assignment ---
+    # is_random: 이 유저가 랜덤 배정인지 (CATE 학습에 사용 가능한 데이터인지)
     if cate is None:
-        # Exploration mode — 100% random
+        # Exploration mode — CATE 모델 없음, 100% 랜덤 배정
         trigger_scores = None
-        best_trigger = random.choice(ALL_TRIGGERS)
+        best_trigger = random.choice(TREATMENT_TRIGGERS)
+        is_random = True
     else:
-        # Optimized mode
+        # Optimized mode (S-Learner: 단일 모델, trigger를 one-hot feature로 포함)
         feature_names = cate["feature_names"]
-        # Build feature vector for CATE model using feature names
-        feature_dict = dict(zip(
-            UA_FEATURE_NAMES + [
-                'product_viewed_count', 'user_signin', 'product_addedtocart',
-                'deeplink_open', 'home_viewed', 'addtowishlist', 'onboarding',
-                'user_signup', 'total_events', 'n_event_types',
-            ],
-            features
-        ))
-        x_cate = np.array([[feature_dict.get(f, 0) for f in feature_names]])
+        feature_dict = dict(zip(ALL_FEATURE_NAMES, features))
+        base_features = np.array([feature_dict.get(f, 0) for f in feature_names])
 
-        # Predict click probability for each trigger
+        # 각 trigger에 대해 클릭 확률 예측
         trigger_scores = {}
         for trigger in cate["treatment_triggers"]:
-            prob = cate["trigger_models"][trigger].predict_proba(x_cate)[0, 1]
+            trigger_onehot = np.array([1 if t == trigger else 0 for t in cate["treatment_triggers"]])
+            x = np.concatenate([base_features, trigger_onehot]).reshape(1, -1)
+            prob = cate["model"].predict_proba(x)[0, 1]
             trigger_scores[trigger] = round(float(prob), 4)
 
-        # 80% model recommendation, 20% random (for continued data collection)
+        # 80% 모델 추천, 20% 랜덤 (지속적 데이터 수집용)
         if random.random() < 0.2:
             best_trigger = random.choice(TREATMENT_TRIGGERS)
+            is_random = True
         else:
             best_trigger = max(trigger_scores, key=trigger_scores.get)
+            is_random = False
 
-    # --- 3. pLTV: Purchase & Churn Prediction ---
+    # --- 2. pLTV: Purchase & Churn Prediction ---
     x_all = features.reshape(1, -1)
     d3_purchase_prob = float(pltv["model"].predict_proba(x_all)[0, 1])
     d3_churn_prob = float(churn["model"].predict_proba(x_all)[0, 1])
 
-    # --- 4. Build Response (clean — no mode, no latent_dimensions) ---
+    # --- 3. Build Response ---
     return {
         "user_id": user_id,
         "best_trigger": best_trigger,
         "trigger_scores": trigger_scores,
+        "is_random": is_random,  # CATE 학습에 사용 가능한 데이터인지
         "d3_purchase_prob": round(d3_purchase_prob, 4),
         "d3_churn_prob": round(d3_churn_prob, 4),
     }

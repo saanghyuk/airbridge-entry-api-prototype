@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from pathlib import Path
 from server.predict import load_models_for_app, reload_models_for_app, predict, get_loaded_apps, list_available_apps, MODEL_DIR
 from server.feature_store import FeatureStore
+from server.logger import log_prediction
 
 # Feature Store만 시작 시 로드 (모델은 앱별 lazy loading)
 store = FeatureStore()
@@ -61,7 +62,12 @@ def entry_predict(req: PredictRequest):
         )
 
     # 3. 예측
-    return predict(req.airbridge_uuid, features, models)
+    result = predict(req.airbridge_uuid, features, models)
+
+    # 4. 예측 결과 로깅 (Supabase 미설정 시 자동 스킵)
+    log_prediction(req.app_id, result)
+
+    return result
 
 
 @app.get("/health")

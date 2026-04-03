@@ -7,6 +7,13 @@ Feature Store — Prototype
 
 Lookup key: (app_id, airbridge_uuid)
 Returns: 25-element numpy array (15 UA + 10 in-app features)
+
+# Redis 교체 시 변경 사항:
+#   1. __init__에서 Redis 클라이언트 연결
+#   2. lookup()에서 Redis HGET → numpy 변환
+#   3. list_users()에서 Redis SCAN 사용
+#   4. user_count에서 Redis DBSIZE 사용
+#   인터페이스(메서드 시그니처)는 동일하게 유지
 """
 import pandas as pd
 import numpy as np
@@ -33,26 +40,39 @@ ALL_FEATURES = UA_FEATURES + INAPP_FEATURES
 
 
 class FeatureStore:
-    """In-memory feature store backed by CSV."""
+    """
+    Feature Store interface.
+    현재: CSV in-memory (prototype)
+    이후: Redis or DynamoDB로 교체 가능 (같은 인터페이스)
+    """
 
     def __init__(self, csv_path: Path = DATA_PATH):
+        # --- CSV 구현 ---
+        # Redis 교체 시: self.redis = redis.Redis(host=..., port=..., db=0)
         self.df = pd.read_csv(csv_path)
-        # Build lookup index: (app_id, airbridge_uuid) → row index
+        # Build lookup index: (app_id, airbridge_uuid) -> row index
         self.df['_key'] = self.df['app_id'] + '::' + self.df['airbridge_uuid']
         self._index = dict(zip(self.df['_key'], self.df.index))
         # Pre-compute feature matrix as numpy
         self._features = self.df[ALL_FEATURES].values.astype(np.float64)
         print(f"[FeatureStore] Loaded {len(self.df)} users from {csv_path}")
 
-    def lookup(self, app_id: str, airbridge_uuid: str) -> Optional[np.ndarray]:
+    def lookup(self, app_id: str, user_id: str) -> Optional[np.ndarray]:
         """
-        Lookup user features by (app_id, airbridge_uuid).
+        25-element feature array or None.
+
+        Args:
+            app_id: 앱 식별자 (e.g., "ablog")
+            user_id: airbridge_uuid
 
         Returns:
             np.ndarray of shape (25,) if found, None otherwise.
             Order: 15 UA features + 10 in-app features (matches model training order).
         """
-        key = f"{app_id}::{airbridge_uuid}"
+        # --- CSV 구현 ---
+        # Redis 교체 시: raw = self.redis.hget(f"{app_id}::{user_id}", "features")
+        #                return np.frombuffer(raw, dtype=np.float64) if raw else None
+        key = f"{app_id}::{user_id}"
         idx = self._index.get(key)
         if idx is None:
             return None
@@ -60,9 +80,12 @@ class FeatureStore:
 
     def list_users(self, app_id: str) -> list[str]:
         """Return all airbridge_uuids for a given app_id."""
+        # Redis 교체 시: SCAN with pattern f"{app_id}::*"
         mask = self.df['app_id'] == app_id
         return self.df.loc[mask, 'airbridge_uuid'].tolist()
 
     @property
     def user_count(self) -> int:
+        """Total number of users across all apps."""
+        # Redis 교체 시: self.redis.dbsize()
         return len(self.df)
