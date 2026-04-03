@@ -124,27 +124,29 @@ def list_available_apps(model_dir: Path = MODEL_DIR) -> list[str]:
     ]
 
 
-def predict(user_id: str, features: np.ndarray, models: dict) -> dict:
+def predict(app_id: str, user_id: str, features: np.ndarray, models: dict) -> dict:
     """
     Main prediction function. Called for each API request.
 
     Args:
+        app_id: 앱 식별자
         user_id: airbridge_uuid
         features: np.ndarray of shape (25,) — 15 UA + 10 in-app features
                   (returned by FeatureStore.lookup)
         models: Loaded model dict from load_models_for_app()
 
     Returns:
-        Clean API response dict (no mode, no latent_dimensions)
+        Clean API response dict
     """
-    # 동일 유저 중복 요청 방지 (TTL 1시간)
+    # 동일 유저 중복 요청 방지 (TTL 1시간, app_id::user_id로 구분)
+    cache_key = f"{app_id}::{user_id}"
     now = time.time()
-    if user_id in _user_trigger_cache:
-        cached_result, cached_at = _user_trigger_cache[user_id]
+    if cache_key in _user_trigger_cache:
+        cached_result, cached_at = _user_trigger_cache[cache_key]
         if now - cached_at < _USER_CACHE_TTL:
             return cached_result
         else:
-            del _user_trigger_cache[user_id]
+            del _user_trigger_cache[cache_key]
 
     pltv = models["pltv"]
     churn = models["churn"]
@@ -204,7 +206,7 @@ def predict(user_id: str, features: np.ndarray, models: dict) -> dict:
     }
 
     # 캐시에 저장
-    _user_trigger_cache[user_id] = (result, time.time())
+    _user_trigger_cache[cache_key] = (result, time.time())
     return result
 
 
@@ -220,7 +222,7 @@ if __name__ == "__main__":
     models = load_models_for_app("ablog")
     uuids = store.list_users("ablog")
     features = store.lookup("ablog", uuids[0])
-    response = predict(uuids[0], features, models)
+    response = predict("ablog", uuids[0], features, models)
     print(json.dumps(response, indent=2, ensure_ascii=False))
 
     # Test sample_app (no CATE -> exploration mode)
@@ -229,5 +231,5 @@ if __name__ == "__main__":
     uuids_sample = store.list_users("sample_app")
     if uuids_sample:
         features_sample = store.lookup("sample_app", uuids_sample[0])
-        response_sample = predict(uuids_sample[0], features_sample, models_sample)
+        response_sample = predict("sample_app", uuids_sample[0], features_sample, models_sample)
         print(json.dumps(response_sample, indent=2, ensure_ascii=False))

@@ -62,7 +62,7 @@ def entry_predict(req: PredictRequest, background_tasks: BackgroundTasks):
         )
 
     # 3. 예측
-    result = predict(req.airbridge_uuid, features, models)
+    result = predict(req.app_id, req.airbridge_uuid, features, models)
 
     # 4. 예측 결과 로깅 — 응답 반환 후 백그라운드에서 실행 (레이턴시 영향 없음)
     background_tasks.add_task(log_prediction, req.app_id, result)

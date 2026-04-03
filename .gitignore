@@ -4,3 +4,4 @@ __pycache__/
 .DS_Store
 .ipynb_checkpoints/
 Untitled.ipynb
+query_and_sample/
