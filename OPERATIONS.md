@@ -21,8 +21,9 @@ airbridge-entry-api-prototype/
 ├── data/                    # 학습 데이터
 │   ├── feature_store.csv     # Feature Store (전체 앱 공용)
 │   ├── {app_name}/           # 앱별 데이터 디렉토리
-│   │   ├── weekly_data.csv   # 주간 학습 데이터
-│   │   └── rct_data.csv      # Phase 1 RCT 데이터
+│   │   ├── weekly_2026-04-07.csv  # 매주 날짜별로 쌓임
+│   │   ├── weekly_2026-04-14.csv  # 최신 파일을 자동으로 사용
+│   │   └── rct_data.csv      # Phase 1 RCT 데이터 (1회)
 │   ├── generate_feature_store.py  # 샘플 데이터 생성
 │   └── generate_weekly_data.py    # 샘플 데이터 생성
 ├── models/                  # 학습된 모델 파일
@@ -56,11 +57,30 @@ AND DATA__EVENTDATA__CATEGORY LIKE '9360%'
 GROUP BY 1 ORDER BY CNT DESC LIMIT 30;
 ```
 
-### Step 2: CSV로 저장
+### Step 2: 이벤트 목록 CSV 저장
 
 결과를 `query_and_sample/events_{app_name}.csv`로 저장
 
-### Step 3: onboarding.ipynb 실행
+### Step 3: 학습 데이터 추출 (과거 30~60일)
+
+**온보딩 때는 넉넉하게 과거 데이터를 뽑습니다.** D3 Purchase/Churn 모델은 RCT와 무관하므로, 과거 데이터가 많을수록 모델이 정확해집니다.
+
+```
+온보딩 데이터 범위:
+  start_date = 오늘 - 60일 (또는 30일)
+  end_date = 오늘 - 3일 (D3 outcome 확정 필요)
+```
+
+SQL과 CSV 포맷은 `docs/weekly_data_format.md` 참고. 추출한 CSV를:
+```
+data/{app_name}/weekly_YYYY-MM-DD.csv
+```
+으로 저장. (예: `data/musinsa/weekly_2026-04-04.csv`)
+
+**⚠️ 온보딩 데이터에는 `assigned_trigger`, `is_random`, `modal_clicked` 컬럼이 없어도 됩니다.**
+이 컬럼들은 RCT 후 CATE 학습에만 쓰이고, D3 모델 학습에는 필요 없습니다.
+
+### Step 4: onboarding.ipynb 실행
 
 노트북 상단에서 설정:
 ```python
@@ -103,12 +123,38 @@ curl https://airbridge-entry-api-prototype.onrender.com/health
 
 ### 데이터 준비
 
-Snowflake에서 이번 주 신규 유저 데이터를 추출하여 저장:
+**온보딩과 다른 점**: 매주 학습에서는 **Supabase prediction_logs와 JOIN**이 필요합니다.
+
 ```
-data/{app_name}/weekly_data.csv
+매주 데이터 범위:
+  start_date = 오늘 - 10일
+  end_date = 오늘 - 3일 (D3 outcome 확정 필요)
+  → 최근 7일간 설치 유저 (D3 outcome 확정된 것만)
 ```
 
-필요한 컬럼은 `docs/weekly_data_format.md` 참고.
+#### 데이터 수집 흐름:
+
+```
+1. Snowflake에서 features + outcomes 추출 (최근 7일)
+   → user_id, UA features(15), In-app features(10), d3_purchase, d3_churn
+
+2. Supabase에서 prediction_logs 다운로드
+   → user_id, assigned_trigger, is_random
+
+3. user_id로 JOIN
+   → Supabase에 없는 유저 (API 호출 전)은 assigned_trigger=NaN
+   → D3 학습에는 전체 사용, CATE 학습에는 is_random=1만 사용
+
+4. CSV로 저장:
+   data/{app_name}/weekly_YYYY-MM-DD.csv
+```
+
+예: `data/musinsa/weekly_2026-04-07.csv`
+
+**중요:**
+- 노트북이 자동으로 가장 최신 `weekly_*.csv` 파일을 찾아 사용합니다
+- 과거 데이터 파일은 삭제하지 마세요 (CATE 학습 시 누적 사용 가능)
+- JOIN 방법 상세는 `docs/weekly_data_format.md` 참고
 
 ### 노트북 실행
 
@@ -173,7 +219,7 @@ Step 1~7 실행. 또는 weekly_training.ipynb Step 6에서도 CATE 학습 가능
 ## 4. 주간 체크리스트
 
 ```
-□ 각 앱 데이터 추출 (Snowflake → data/{app_name}/weekly_data.csv)
+□ 각 앱 데이터 추출 (Snowflake → data/{app_name}/weekly_YYYY-MM-DD.csv)
 □ weekly_training.ipynb 실행 (또는 python scripts/train_all_apps.py)
 □ AUC 확인 (Purchase > 0.75, Churn > 0.65)
 □ pkl 서버 업로드 완료 확인

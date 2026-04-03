@@ -5,8 +5,10 @@
     python scripts/train_all_apps.py
 
 앱 목록은 configs/ 폴더의 json 파일에서 자동 감지합니다.
+데이터는 data/{app_name}/weekly_YYYY-MM-DD.csv 에서 최신 파일을 자동으로 찾습니다.
 """
 import os
+import glob
 import json
 import pickle
 import requests
@@ -42,13 +44,15 @@ def train_app(app_id):
     print(f"[{app_id}] 학습 시작")
     print(f"{'='*50}")
 
-    # 데이터 로드 (앱별 디렉토리: data/{app_id}/weekly_data.csv)
-    csv_path = os.path.join(DATA_DIR, app_id, "weekly_data.csv")
-    if not os.path.exists(csv_path):
-        print(f"  ⚠️ {csv_path} 없음 — 건너뜀")
+    # Find latest weekly data for this app
+    data_dir = os.path.join(DATA_DIR, app_id)
+    weekly_files = sorted(glob.glob(os.path.join(data_dir, "weekly_*.csv")))
+    if not weekly_files:
+        print(f"  ⚠️ 데이터 없음 — 건너뜀")
         return
-
-    df = pd.read_csv(csv_path)
+    latest_file = weekly_files[-1]
+    df = pd.read_csv(latest_file)
+    print(f"  📂 {os.path.basename(latest_file)} 로드 (파일 {len(weekly_files)}개 중 최신)")
     if 'app_id' in df.columns:
         df = df[df['app_id'] == app_id].reset_index(drop=True)
 

@@ -1,6 +1,10 @@
 """
-Generate weekly_data.csv (1000 users) — represents "this week's new users"
+Generate weekly_YYYY-MM-DD.csv (1000 users) — represents "this week's new users"
 and regenerate rct_data.csv (8000 users) — Phase 1 initial RCT data.
+
+Files are saved to data/{app_name}/ directory:
+  - weekly_YYYY-MM-DD.csv (dated, accumulates over time)
+  - rct_data.csv (fixed, one-time)
 
 ALL users have: UA features, In-app features, assigned_trigger, modal_clicked,
 first_session_purchase, d3_purchase, d3_churn.
@@ -8,6 +12,7 @@ first_session_purchase, d3_purchase, d3_churn.
 20% are randomly assigned (is_random=1), 80% are model-recommended (is_random=0).
 Model-recommended users have better outcomes on average.
 """
+import os
 import numpy as np
 import pandas as pd
 
@@ -153,10 +158,16 @@ def generate_outcomes(ua_df, inapp_df, purchase_rate=0.23, churn_rate=0.34):
 
 
 # ============================================================
-# Generate weekly_data.csv (1000 users)
+# Generate weekly_YYYY-MM-DD.csv (1000 users)
 # ============================================================
+from datetime import datetime
+
+APP_NAME = "ablog"
+os.makedirs(f'/Users/ab180/Desktop/David/airbridge-entry-api-prototype/data/{APP_NAME}', exist_ok=True)
+
+today_str = datetime.now().strftime('%Y-%m-%d')
 print("=" * 60)
-print("Generating weekly_data.csv (1000 users)...")
+print(f"Generating weekly_{today_str}.csv (1000 users)...")
 print("=" * 60)
 
 n_weekly = 1000
@@ -204,7 +215,7 @@ weekly_df = pd.concat([
     }),
 ], axis=1)
 
-weekly_df.to_csv('/Users/ab180/Desktop/David/airbridge-entry-api-prototype/data/weekly_data.csv', index=False)
+weekly_df.to_csv(f'/Users/ab180/Desktop/David/airbridge-entry-api-prototype/data/{APP_NAME}/weekly_{today_str}.csv', index=False)
 
 print(f"  Total users: {len(weekly_df)}")
 print(f"  Random (is_random=1): {is_random.sum()} ({is_random.mean():.1%})")
@@ -254,7 +265,7 @@ rct_df = pd.concat([
     }),
 ], axis=1)
 
-rct_df.to_csv('/Users/ab180/Desktop/David/airbridge-entry-api-prototype/data/rct_data.csv', index=False)
+rct_df.to_csv(f'/Users/ab180/Desktop/David/airbridge-entry-api-prototype/data/{APP_NAME}/rct_data.csv', index=False)
 
 print(f"  Total users: {len(rct_df)}")
 print(f"  Trigger distribution:")
