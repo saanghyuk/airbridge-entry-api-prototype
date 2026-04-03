@@ -49,6 +49,14 @@ class FeatureStore:
     def __init__(self, csv_path: Path = DATA_PATH):
         # --- CSV 구현 ---
         # Redis 교체 시: self.redis = redis.Redis(host=..., port=..., db=0)
+        if not csv_path.exists():
+            print(f"[FeatureStore] WARNING: {csv_path} not found. Starting with empty store.")
+            self.df = pd.DataFrame(columns=['app_id', 'airbridge_uuid'] + ALL_FEATURES)
+            self.df['_key'] = pd.Series(dtype=str)
+            self._index = {}
+            self._features = np.empty((0, len(ALL_FEATURES)), dtype=np.float64)
+            return
+
         self.df = pd.read_csv(csv_path)
         # Build lookup index: (app_id, airbridge_uuid) -> row index
         self.df['_key'] = self.df['app_id'] + '::' + self.df['airbridge_uuid']
