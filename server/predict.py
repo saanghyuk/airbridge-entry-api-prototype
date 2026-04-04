@@ -93,6 +93,24 @@ def load_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[di
         models["cate"] = None
         print(f"[Server] [{app_id}] No CATE model -> exploration mode (random trigger)")
 
+    # pLTV models (optional — 없으면 pltv_result: null)
+    pltv_purchase_path = app_dir / "pltv_purchase_model.pkl"
+    pltv_amount_path = app_dir / "pltv_amount_model.pkl"
+    pltv_config_path = app_dir / "pltv_tier_config.json"
+
+    if pltv_purchase_path.exists() and pltv_amount_path.exists() and pltv_config_path.exists():
+        with open(pltv_purchase_path, "rb") as f:
+            models["pltv_purchase"] = pickle.load(f)
+        with open(pltv_amount_path, "rb") as f:
+            models["pltv_amount"] = pickle.load(f)
+        with open(pltv_config_path) as f:
+            models["pltv_config"] = json.load(f)
+        print(f"[Server] [{app_id}] pLTV models loaded")
+    else:
+        models["pltv_purchase"] = None
+        models["pltv_amount"] = None
+        models["pltv_config"] = None
+
     _model_cache[app_id] = models
     print(f"[Server] [{app_id}] All models loaded from {app_dir}")
     return models
@@ -195,7 +213,44 @@ def predict(app_id: str, user_id: str, features: np.ndarray, models: dict) -> di
     d3_purchase_prob = float(pltv["model"].predict_proba(x_all)[0, 1])
     d3_churn_prob = float(churn["model"].predict_proba(x_all)[0, 1])
 
-    # --- 3. Build Response ---
+    # --- 3. pLTV: Tier prediction ---
+    pltv_purchase_model = models.get("pltv_purchase")
+    pltv_amount_model = models.get("pltv_amount")
+    pltv_config = models.get("pltv_config")
+
+    if pltv_purchase_model and pltv_amount_model and pltv_config:
+        # Stage 1: P(D30 purchase)
+        p_d30 = float(pltv_purchase_model["model"].predict_proba(x_all)[0, 1])
+        # Stage 2: E[amount | purchase] (log-transformed)
+        log_amount = float(pltv_amount_model["model"].predict(x_all)[0])
+        e_amount = float(np.expm1(max(log_amount, 0)))  # prevent negative
+        # pLTV score
+        pltv_score = p_d30 * e_amount
+
+        # Tier determination (tiers sorted high→low)
+        tier = "low"
+        for t in pltv_config["tiers"]:
+            if pltv_score >= t["threshold"]:
+                tier = t["name"]
+                break
+
+        # Percentile
+        score_pcts = pltv_config.get("score_percentiles", [])
+        if score_pcts:
+            percentile = int(np.searchsorted(score_pcts, pltv_score) / max(len(score_pcts), 1) * 100)
+            percentile = max(0, min(99, percentile))
+        else:
+            percentile = 50
+
+        pltv_result = {
+            "tier": tier,
+            "percentile": percentile,
+            "tier_avg_ltv": pltv_config.get("tier_avg_ltv", {}).get(tier, 0),
+        }
+    else:
+        pltv_result = None
+
+    # --- 4. Build Response ---
     result = {
         "user_id": user_id,
         "best_trigger": best_trigger,
@@ -203,6 +258,7 @@ def predict(app_id: str, user_id: str, features: np.ndarray, models: dict) -> di
         "is_random": is_random,  # CATE 학습에 사용 가능한 데이터인지
         "d3_purchase_prob": round(d3_purchase_prob, 4),
         "d3_churn_prob": round(d3_churn_prob, 4),
+        "pltv": pltv_result,
     }
 
     # 캐시에 저장

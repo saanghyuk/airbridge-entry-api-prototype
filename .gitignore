@@ -7,6 +7,9 @@ Untitled.ipynb
 query_and_sample/
 research/
 
+# pLTV 연구용 노트북 (public에 안 올림)
+pltv/
+
 # 내부 운영용 (public repo에 올리지 않음)
 OPERATIONS.md
 notebooks/

@@ -43,6 +43,7 @@ def log_prediction(app_id: str, prediction: dict):
         return  # Supabase not configured — skip logging
 
     try:
+        pltv_data = prediction.get("pltv")
         row = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "app_id": app_id,
@@ -52,6 +53,8 @@ def log_prediction(app_id: str, prediction: dict):
             "trigger_scores": json.dumps(prediction["trigger_scores"]) if prediction["trigger_scores"] else None,
             "d3_purchase_prob": prediction["d3_purchase_prob"],
             "d3_churn_prob": prediction["d3_churn_prob"],
+            "pltv_tier": pltv_data["tier"] if pltv_data else None,
+            "pltv_percentile": pltv_data["percentile"] if pltv_data else None,
         }
         client.table("prediction_logs").insert(row).execute()
     except Exception as e:

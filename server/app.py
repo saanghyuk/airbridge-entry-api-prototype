@@ -88,6 +88,9 @@ VALID_MODEL_FILES = {
     "d3_purchase_model.pkl",
     "d3_churn_model.pkl",
     "cate_model.pkl",
+    "pltv_purchase_model.pkl",
+    "pltv_amount_model.pkl",
+    "pltv_tier_config.json",
 }
 
 
