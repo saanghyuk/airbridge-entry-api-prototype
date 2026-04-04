@@ -59,8 +59,7 @@ class FeatureStore:
 
         self.df = pd.read_csv(csv_path)
 
-        # Column validation
-        self.df.columns = [c.lower() for c in self.df.columns]  # Snowflake uppercase safety
+        # Column validation (feature_store.csv is our own file, not from Snowflake)
         missing_cols = [c for c in ALL_FEATURES if c not in self.df.columns]
         if missing_cols:
             raise ValueError(f"[FeatureStore] feature_store.csv missing columns: {missing_cols}")
