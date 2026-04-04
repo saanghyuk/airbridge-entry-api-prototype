@@ -21,3 +21,6 @@ data/sample_app/
 data/testshop/
 data/generate_*.py
 data/styleshare/
+landing/node_modules/
+landing/.next/
+.playwright-mcp/

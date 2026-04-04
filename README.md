@@ -16,6 +16,10 @@
   </picture>
 </p>
 
+<p align="center">
+  <a href="https://airbridge-entry-api.vercel.app"><strong>🌐 Landing Page</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict"><strong>⚡ Live API</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="https://airbridge-entry-api-prototype.onrender.com/docs"><strong>📘 API Docs</strong></a>
+</p>
+
 > 개인화, CRM, 리타겟팅, 추천 엔진 — 전부 유저가 남아있어야 의미 있는 것들입니다.
 >
 > 문제는, **대부분의 유저가 그 전에 떠난다는 겁니다.**
