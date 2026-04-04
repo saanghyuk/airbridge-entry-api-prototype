@@ -75,20 +75,34 @@ def load_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[di
     models = {}
 
     # D3 Purchase model
-    with open(app_dir / "d3_purchase_model.pkl", "rb") as f:
-        models["pltv"] = pickle.load(f)
+    try:
+        with open(app_dir / "d3_purchase_model.pkl", "rb") as f:
+            models["pltv"] = pickle.load(f)
+        assert "model" in models["pltv"] and "feature_names" in models["pltv"], "Invalid pkl structure"
+    except Exception as e:
+        print(f"[Server] [{app_id}] ERROR loading d3_purchase_model.pkl: {e}")
+        return None
 
     # D3 Churn model
-    with open(app_dir / "d3_churn_model.pkl", "rb") as f:
-        models["churn"] = pickle.load(f)
+    try:
+        with open(app_dir / "d3_churn_model.pkl", "rb") as f:
+            models["churn"] = pickle.load(f)
+        assert "model" in models["churn"] and "feature_names" in models["churn"], "Invalid pkl structure"
+    except Exception as e:
+        print(f"[Server] [{app_id}] ERROR loading d3_churn_model.pkl: {e}")
+        return None
 
     # CATE model (optional — 없으면 exploration mode)
     # S-Learner: 단일 모델, trigger를 feature로 포함
     cate_path = app_dir / "cate_model.pkl"
     if cate_path.exists():
-        with open(cate_path, "rb") as f:
-            models["cate"] = pickle.load(f)
-        print(f"[Server] [{app_id}] CATE model loaded (S-Learner) -> optimized mode")
+        try:
+            with open(cate_path, "rb") as f:
+                models["cate"] = pickle.load(f)
+            print(f"[Server] [{app_id}] CATE model loaded (S-Learner) -> optimized mode")
+        except Exception as e:
+            print(f"[Server] [{app_id}] ERROR loading cate_model.pkl: {e}")
+            models["cate"] = None
     else:
         models["cate"] = None
         print(f"[Server] [{app_id}] No CATE model -> exploration mode (random trigger)")
@@ -99,13 +113,19 @@ def load_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[di
     pltv_config_path = app_dir / "pltv_tier_config.json"
 
     if pltv_purchase_path.exists() and pltv_amount_path.exists() and pltv_config_path.exists():
-        with open(pltv_purchase_path, "rb") as f:
-            models["pltv_purchase"] = pickle.load(f)
-        with open(pltv_amount_path, "rb") as f:
-            models["pltv_amount"] = pickle.load(f)
-        with open(pltv_config_path) as f:
-            models["pltv_config"] = json.load(f)
-        print(f"[Server] [{app_id}] pLTV models loaded")
+        try:
+            with open(pltv_purchase_path, "rb") as f:
+                models["pltv_purchase"] = pickle.load(f)
+            with open(pltv_amount_path, "rb") as f:
+                models["pltv_amount"] = pickle.load(f)
+            with open(pltv_config_path) as f:
+                models["pltv_config"] = json.load(f)
+            print(f"[Server] [{app_id}] pLTV models loaded")
+        except Exception as e:
+            print(f"[Server] [{app_id}] ERROR loading pLTV models: {e}")
+            models["pltv_purchase"] = None
+            models["pltv_amount"] = None
+            models["pltv_config"] = None
     else:
         models["pltv_purchase"] = None
         models["pltv_amount"] = None
@@ -120,6 +140,12 @@ def reload_models_for_app(app_id: str, model_dir: Path = MODEL_DIR) -> Optional[
     """앱의 모델을 강제 리로드 (캐시 무시). pkl 업로드 후 호출."""
     if app_id in _model_cache:
         del _model_cache[app_id]
+    # Clear user prediction cache for this app (stale after model update)
+    stale_keys = [k for k in _user_trigger_cache if k.startswith(f"{app_id}::")]
+    for k in stale_keys:
+        del _user_trigger_cache[k]
+    if stale_keys:
+        print(f"[Server] [{app_id}] Cleared {len(stale_keys)} cached predictions")
     return load_models_for_app(app_id, model_dir)
 
 
@@ -203,11 +229,13 @@ def predict(app_id: str, user_id: str, features: np.ndarray, models: dict) -> di
     # Feature 순서 검증 (모델이 기대하는 feature 순서와 일치하는지 확인)
     expected_pltv_features = pltv.get("feature_names", ALL_FEATURE_NAMES)
     if list(expected_pltv_features) != list(ALL_FEATURE_NAMES):
-        print(f"[Server] [WARNING] pLTV feature order mismatch: expected {expected_pltv_features}, got {ALL_FEATURE_NAMES}")
+        print(f"[Server] [ERROR] D3 Purchase feature mismatch! Model expects {expected_pltv_features}, server has {ALL_FEATURE_NAMES}")
+        raise ValueError(f"Feature mismatch in d3_purchase_model for {app_id}")
 
     expected_churn_features = churn.get("feature_names", ALL_FEATURE_NAMES)
     if list(expected_churn_features) != list(ALL_FEATURE_NAMES):
-        print(f"[Server] [WARNING] Churn feature order mismatch: expected {expected_churn_features}, got {ALL_FEATURE_NAMES}")
+        print(f"[Server] [ERROR] Churn feature mismatch! Model expects {expected_churn_features}, server has {ALL_FEATURE_NAMES}")
+        raise ValueError(f"Feature mismatch in d3_churn_model for {app_id}")
 
     x_all = features.reshape(1, -1)
     d3_purchase_prob = float(pltv["model"].predict_proba(x_all)[0, 1])
@@ -219,34 +247,33 @@ def predict(app_id: str, user_id: str, features: np.ndarray, models: dict) -> di
     pltv_config = models.get("pltv_config")
 
     if pltv_purchase_model and pltv_amount_model and pltv_config:
-        # Stage 1: P(D30 purchase)
-        p_d30 = float(pltv_purchase_model["model"].predict_proba(x_all)[0, 1])
-        # Stage 2: E[amount | purchase] (log-transformed)
-        log_amount = float(pltv_amount_model["model"].predict(x_all)[0])
-        e_amount = float(np.expm1(max(log_amount, 0)))  # prevent negative
-        # pLTV score
-        pltv_score = p_d30 * e_amount
+        try:
+            p_d30 = float(pltv_purchase_model["model"].predict_proba(x_all)[0, 1])
+            log_amount = float(pltv_amount_model["model"].predict(x_all)[0])
+            e_amount = float(np.expm1(max(log_amount, 0)))
+            pltv_score = p_d30 * e_amount
 
-        # Tier determination (tiers sorted high→low)
-        tier = "low"
-        for t in pltv_config["tiers"]:
-            if pltv_score >= t["threshold"]:
-                tier = t["name"]
-                break
+            tier = "low"
+            for t in pltv_config["tiers"]:
+                if pltv_score >= t["threshold"]:
+                    tier = t["name"]
+                    break
 
-        # Percentile
-        score_pcts = pltv_config.get("score_percentiles", [])
-        if score_pcts:
-            percentile = int(np.searchsorted(score_pcts, pltv_score) / max(len(score_pcts), 1) * 100)
-            percentile = max(0, min(99, percentile))
-        else:
-            percentile = 50
+            score_pcts = pltv_config.get("score_percentiles", [])
+            if score_pcts:
+                percentile = int(np.searchsorted(score_pcts, pltv_score) / max(len(score_pcts), 1) * 100)
+                percentile = max(0, min(99, percentile))
+            else:
+                percentile = 50
 
-        pltv_result = {
-            "tier": tier,
-            "percentile": percentile,
-            "tier_avg_ltv": pltv_config.get("tier_avg_ltv", {}).get(tier, 0),
-        }
+            pltv_result = {
+                "tier": tier,
+                "percentile": percentile,
+                "tier_avg_ltv": pltv_config.get("tier_avg_ltv", {}).get(tier, 0),
+            }
+        except Exception as e:
+            print(f"[Server] [{app_id}] pLTV prediction error: {e}")
+            pltv_result = None
     else:
         pltv_result = None
 

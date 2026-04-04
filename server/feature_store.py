@@ -58,12 +58,29 @@ class FeatureStore:
             return
 
         self.df = pd.read_csv(csv_path)
+
+        # Column validation
+        self.df.columns = [c.lower() for c in self.df.columns]  # Snowflake uppercase safety
+        missing_cols = [c for c in ALL_FEATURES if c not in self.df.columns]
+        if missing_cols:
+            raise ValueError(f"[FeatureStore] feature_store.csv missing columns: {missing_cols}")
+
+        # NaN check — fill with 0 (organic users may have NaN UA features)
+        nan_counts = self.df[ALL_FEATURES].isna().sum()
+        if nan_counts.sum() > 0:
+            print(f"[FeatureStore] WARNING: NaN found, filling with 0: {nan_counts[nan_counts > 0].to_dict()}")
+            self.df[ALL_FEATURES] = self.df[ALL_FEATURES].fillna(0)
+
         # Build lookup index: (app_id, airbridge_uuid) -> row index
         self.df['_key'] = self.df['app_id'] + '::' + self.df['airbridge_uuid']
         self._index = dict(zip(self.df['_key'], self.df.index))
         # Pre-compute feature matrix as numpy
+        # Convert to numeric (handles empty strings from CSV)
+        for col in ALL_FEATURES:
+            self.df[col] = pd.to_numeric(self.df[col], errors='coerce')
+        self.df[ALL_FEATURES] = self.df[ALL_FEATURES].fillna(0)
         self._features = self.df[ALL_FEATURES].values.astype(np.float64)
-        print(f"[FeatureStore] Loaded {len(self.df)} users from {csv_path}")
+        print(f"[FeatureStore] Loaded {len(self.df)} users ({len(ALL_FEATURES)} features) from {csv_path}")
 
     def lookup(self, app_id: str, user_id: str) -> Optional[np.ndarray]:
         """
