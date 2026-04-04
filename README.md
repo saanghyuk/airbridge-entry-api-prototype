@@ -49,6 +49,7 @@ Airbridge는 다수의 커머스 앱, 수십만 명의 유저를 분석하며 **
 1. **이 유저에게 어떤 메시지를 보여줘야 하는지** — 할인? 인기상품? 한정세일? 신상품?
 2. **이 유저가 3일 내 구매할 확률** — 고가치 유저에게 쿠폰을 집중
 3. **이 유저가 3일 내 이탈할 확률** — 이탈 위험 유저를 먼저 잡기
+4. **이 유저의 30일 예상 LTV 등급** — high / medium / low 3단계로 유저 가치 분류
 
 멀티터치포인트 광고 여정 데이터 + 앱 진입 후 첫 5분 행동을 결합해서, **다른 누구도 데이터가 없다고 포기한 그 순간에** 실시간으로 분석합니다.
 
@@ -170,7 +171,12 @@ curl -X POST https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict
   },
   "is_random": false,
   "d3_purchase_prob": 0.14,
-  "d3_churn_prob": 0.41
+  "d3_churn_prob": 0.41,
+  "pltv": {
+    "tier": "high",
+    "percentile": 85,
+    "tier_avg_ltv": 110019
+  }
 }
 ```
 
@@ -183,6 +189,9 @@ curl -X POST https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict
 | `is_random` | 이 배정이 랜덤 실험인지 여부 | `true`면 실험 데이터 (CATE 학습용), `false`면 모델 추천 |
 | `d3_purchase_prob` | 이 유저가 3일 내 구매할 확률 | 높으면 → 공격적 쿠폰, 낮으면 → 쿠폰 아낌 |
 | `d3_churn_prob` | 이 유저가 3일 내 이탈할 확률 | 높으면 → 리텐션 메시지 우선 |
+| `pltv.tier` | 이 유저의 30일 예상 가치 등급 | `high` → VIP 쿠폰, `medium` → 일반 쿠폰, `low` → 쿠폰 절약 |
+| `pltv.percentile` | 전체 유저 중 LTV 백분위 (0~99) | 숫자가 높을수록 고가치 유저 |
+| `pltv.tier_avg_ltv` | 해당 등급의 평균 LTV (원) | 쿠폰 금액 결정의 기준 |
 
 ### 4. 앱에서 이렇게 쓰면 됩니다
 
@@ -194,13 +203,18 @@ curl -X POST https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict
 
 또는
 
-  → best_trigger = "price_appeal" + d3_purchase_prob = 0.72
-  → 고가치 유저 + 가격에 반응하는 유형 → "첫 구매 20% 할인" 쿠폰 모달
+  → best_trigger = "price_appeal" + pltv.tier = "high"
+  → VIP 유저 + 가격에 반응하는 유형 → "첫 구매 20% 할인" 프리미엄 쿠폰 모달
 
 또는
 
-  → d3_churn_prob = 0.85
-  → 이탈 위험 높음 → best_trigger에 맞는 긴급 메시지
+  → d3_churn_prob = 0.85 + pltv.tier = "medium"
+  → 이탈 위험 높은 잠재 고객 → best_trigger에 맞는 긴급 리텐션 메시지
+
+또는
+
+  → pltv.tier = "low"
+  → 쿠폰 예산 절약, 기본 환영 메시지만
 ```
 
 ### 5. 테스트용 샘플 UUID
@@ -228,8 +242,10 @@ curl -X POST https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict
 | `product.viewed` | 필수 | 상품 상세 조회 |
 | `user.signin` | 필수 | 로그인 |
 | `product.addedtocart` | 필수 | 장바구니 담기 |
-| `order.completed` | 필수 | 구매 완료 |
+| `order.completed` | **필수** | 구매 완료 — **구매 금액(revenue) 포함 필수** (pLTV 예측에 사용) |
 | `home.viewed` | 권장 | 홈 화면 조회 |
+
+> **중요**: `order.completed` 이벤트에 **구매 금액(revenue)**을 반드시 포함해야 pLTV(예상 유저 가치) 예측이 가능합니다. 태깅 방법은 [Airbridge 이벤트 구성요소 가이드](https://help.airbridge.io/ko/guides/airbridge-event-elements)를 참고하세요.
 
 **2. 4가지 메시지 유형별 화면 디자인**
 
@@ -261,7 +277,7 @@ curl -X POST https://airbridge-entry-api-prototype.onrender.com/v1/entry/predict
 |---------------|------|
 | 광고 여정 + 인앱 데이터 수집/처리 | Airbridge SDK가 이미 하고 있는 것 |
 | 유저별 실시간 데이터 관리 | Feature Store 구축/운영 |
-| 모델 학습 및 서빙 | 메시지 추천 + 구매/이탈 예측 |
+| 모델 학습 및 서빙 | 메시지 추천 + 구매/이탈 예측 + pLTV 등급 분류 |
 | 실험 설계 및 운영 | 랜덤 실험 → 자동 최적화 전환 |
 | 모델 주기적 재학습 | 새 데이터 반영하여 정확도 지속 개선 |
 | API 서버 운영 | 200ms 이내 응답 |
@@ -297,9 +313,16 @@ Response:
   },
   "is_random": false,
   "d3_purchase_prob": 0.14,
-  "d3_churn_prob": 0.41
+  "d3_churn_prob": 0.41,
+  "pltv": {
+    "tier": "high",
+    "percentile": 85,
+    "tier_avg_ltv": 110019
+  }
 }
 ```
+
+> `pltv`는 구매 금액 데이터가 충분할 때 제공됩니다. 데이터가 없으면 `null`로 반환됩니다.
 
 ### 서버 상태 확인
 
