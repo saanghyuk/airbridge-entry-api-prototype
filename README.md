@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <a href="https://airbridge-entry-api.vercel.app"><strong>🌐 airbridge-entry-api.vercel.app</strong></a>
+  <a href="https://airbridge-entry-api.vercel.app"><strong>🌐 Website</strong></a>
 </p>
 
 > 개인화, CRM, 리타겟팅, 추천 엔진 — 전부 유저가 남아있어야 의미 있는 것들입니다.
